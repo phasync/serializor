@@ -251,7 +251,7 @@ final class ClosureStasis extends Stasis
     // Source code extraction (moved from ClosureTransformer)
     // -------------------------------------------------------------------------
 
-    public static function getCode(ReflectionFunction $rf, bool &$usedThis = null, bool &$usedStatic = null, bool &$isStaticFunction = null, array &$useStatements = null): string
+    public static function getCode(ReflectionFunction $rf, ?bool &$usedThis = null, ?bool &$usedStatic = null, ?bool &$isStaticFunction = null, ?array &$useStatements = null): string
     {
         $hash = Reflect::getHash($rf);
         if (isset(self::$functionCache[$hash])) {
