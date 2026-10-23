@@ -1,5 +1,5 @@
 {
-    "name": "frodeborli/serializor",
+    "name": "phasync/serializor",
     "description": "PHP Serializor will serialize almost anything in PHP, including closures and anonymous classes.",
     "keywords": [
         "SerializableClosure",
@@ -37,6 +37,9 @@
     "minimum-stability": "stable",
     "require": {
         "php": "^8.1"
+    },
+    "replace": {
+        "frodeborli/serializor": "self.version"
     },
     "config": {
         "allow-plugins": {

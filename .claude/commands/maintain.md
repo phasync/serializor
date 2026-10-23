@@ -38,8 +38,8 @@ Note: PHP 8.1 requires special handling for some types (e.g., SplFixedArray lack
 ## 3. Check Serializor Issues & PRs
 
 ```bash
-gh issue list --repo frodeborli/serializor --state open
-gh pr list --repo frodeborli/serializor --state open
+gh issue list --repo phasync/serializor --state open
+gh pr list --repo phasync/serializor --state open
 ```
 
 For issues: suggest fixes or draft responses

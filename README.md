@@ -1,10 +1,10 @@
 Serializor
 ====================
-[![Tests](https://github.com/frodeborli/serializor/actions/workflows/tests.yml/badge.svg)](https://github.com/frodeborli/serializor/actions/workflows/tests.yml)
-[![Packagist](https://img.shields.io/packagist/v/frodeborli/serializor?label=Packagist)](https://packagist.org/packages/frodeborli/serializor)
-[![PHP Version](https://img.shields.io/packagist/php-v/frodeborli/serializor)](https://packagist.org/packages/frodeborli/serializor)
-[![Downloads](https://img.shields.io/packagist/dt/frodeborli/serializor?label=Downloads)](https://packagist.org/packages/frodeborli/serializor)
-[![License](https://img.shields.io/packagist/l/frodeborli/serializor?color=teal&label=License)](https://packagist.org/packages/frodeborli/serializor)
+[![Tests](https://github.com/phasync/serializor/actions/workflows/tests.yml/badge.svg)](https://github.com/phasync/serializor/actions/workflows/tests.yml)
+[![Packagist](https://img.shields.io/packagist/v/phasync/serializor?label=Packagist)](https://packagist.org/packages/phasync/serializor)
+[![PHP Version](https://img.shields.io/packagist/php-v/phasync/serializor)](https://packagist.org/packages/phasync/serializor)
+[![Downloads](https://img.shields.io/packagist/dt/phasync/serializor?label=Downloads)](https://packagist.org/packages/phasync/serializor)
+[![License](https://img.shields.io/packagist/l/phasync/serializor?color=teal&label=License)](https://packagist.org/packages/phasync/serializor)
 
 Serialize closures and anonymous classes
 ------------------
@@ -84,7 +84,7 @@ echo ($restored->handler)(21); // 42
 **Serializor** is available on [Packagist] and can be installed via [Composer]:
 
 ```bash
-composer require frodeborli/serializor
+composer require phasync/serializor
 ```
 
 ## Requirements
@@ -173,6 +173,6 @@ Four months later, Opis/Closure v4.0.0 (December 2024) was released as a "comple
 
 **Serializor** is licensed under the [MIT License][license].
 
-[Packagist]: https://packagist.org/packages/frodeborli/serializor "Packagist"
+[Packagist]: https://packagist.org/packages/phasync/serializor "Packagist"
 [Composer]: https://getcomposer.org "Composer"
 [license]: https://opensource.org/licenses/MIT "MIT License"
