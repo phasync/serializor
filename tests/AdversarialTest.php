@@ -24,7 +24,7 @@ use WeakReference;
 
 test('partial tampering of payload is rejected', function () {
     $codec = new Codec('test-secret');
-    $closure = fn() => 'original';
+    $closure = static fn() => 'original';
     $serialized = $codec->serialize($closure);
 
     // Tamper with the payload portion (after the | separator)

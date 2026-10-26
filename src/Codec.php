@@ -79,6 +79,14 @@ class Codec
      */
     public function serialize(mixed &$value): string
     {
+        // Resources never survive a round trip: PHP's native serialize() silently
+        // turns them into int(0) instead of failing, at any nesting depth, so the
+        // usual "try native serialize(), fall back to Stasis on failure" strategy
+        // below can't catch them. Scan for them up front using cheap type checks
+        // only (no native serialize() calls) so this fails loudly instead of
+        // silently corrupting data.
+        $this->assertNoResources($value);
+
         // Fast path: named functions and static methods (no nested objects)
         if ($value instanceof Closure) {
             $rf = new ReflectionFunction($value);
@@ -142,6 +150,121 @@ class Codec
         }
 
         return $result;
+    }
+
+    /**
+     * Recursively scans a value for resources using only cheap type checks
+     * (is_resource/is_array/is_object and reflection on already-known
+     * structures) - never native serialize(). Throws immediately when a
+     * resource is found anywhere in the graph, since resources cannot
+     * survive a serialize()/unserialize() round trip.
+     *
+     * @param array<int,string|int> $path
+     * @param array<string,true> $seenRefs Visited array reference ids, to avoid infinite loops on array cycles (e.g. `$a[] = &$a`).
+     * @param array<int,true> $seenObjects Visited object ids, to avoid infinite loops on object cycles.
+     */
+    private function assertNoResources(mixed &$value, array $path = [], array &$seenRefs = [], array &$seenObjects = []): void
+    {
+        if (\is_resource($value)) {
+            throw new SerializerError(
+                "Cannot serialize a resource ({$this->resourceType($value)})" . $this->describeLocation($path)
+            );
+        }
+
+        if (\is_array($value)) {
+            // Arrays can contain themselves via references (`$a[] = &$a;`).
+            // Track each array's own reference identity, the same way
+            // transform() already does, so such cycles don't recurse forever.
+            $wrap = [&$value];
+            $refId = ReflectionReference::fromArrayElement($wrap, 0)?->getId();
+            if ($refId !== null) {
+                if (isset($seenRefs[$refId])) {
+                    return;
+                }
+                $seenRefs[$refId] = true;
+            }
+
+            foreach ($value as $k => &$v) {
+                if (!\is_scalar($v) && $v !== null) {
+                    $this->assertNoResources($v, [...$path, $k], $seenRefs, $seenObjects);
+                }
+            }
+            return;
+        }
+
+        if (!\is_object($value)) {
+            return;
+        }
+
+        $id = \spl_object_id($value);
+        if (isset($seenObjects[$id])) {
+            return;
+        }
+        $seenObjects[$id] = true;
+
+        if ($value instanceof Closure) {
+            // Deliberately not following $closureThis here: every non-static
+            // closure created inside a method implicitly binds $this, even
+            // when the closure body never uses it, so treating that as
+            // "captured" would make serializing such a closure scan the
+            // entire enclosing object's graph for a resource it never
+            // touches. $this *is* still fully checked - transform() already
+            // walks into it the same way it walks use variables (see the
+            // ClosureStasis branch of transformStasisChildren()), and the
+            // is_resource() check inside transform() below catches a
+            // resource found there, just scoped to the object graph a
+            // serialization actually ends up needing to visit.
+            $rf = new ReflectionFunction($value);
+            foreach ($rf->getClosureUsedVariables() as $name => $v) {
+                if (!\is_scalar($v) && $v !== null) {
+                    $this->assertNoResources($v, [...$path, 'use:' . $name], $seenRefs, $seenObjects);
+                }
+            }
+            return;
+        }
+
+        $props = Stasis::getObjectProperties($value);
+        foreach ($props as $name => &$v) {
+            if (!\is_scalar($v) && $v !== null) {
+                $this->assertNoResources($v, [...$path, $name], $seenRefs, $seenObjects);
+            }
+        }
+    }
+
+    private function resourceType(mixed $resource): string
+    {
+        $type = \get_resource_type($resource);
+        return $type === false ? 'unknown' : $type;
+    }
+
+    /**
+     * Turns a transform() path (array/object/closure key segments) into a
+     * short human-readable location hint for error messages.
+     *
+     * @param array<int,string|int> $path
+     */
+    private function describeLocation(array $path): string
+    {
+        if ($path === []) {
+            return '';
+        }
+
+        $parts = [];
+        foreach ($path as $segment) {
+            if (\is_string($segment) && \str_starts_with($segment, 'use:')) {
+                $parts[] = 'closure variable $' . \substr($segment, 4);
+            } elseif ($segment === 'this') {
+                $parts[] = 'bound $this';
+            } elseif ($segment === 'object') {
+                $parts[] = 'bound object';
+            } elseif (\is_int($segment)) {
+                $parts[] = "[{$segment}]";
+            } else {
+                $parts[] = (string) $segment;
+            }
+        }
+
+        return ' (' . \implode(' -> ', $parts) . ')';
     }
 
     /**
@@ -216,7 +339,22 @@ class Codec
             return $this->referenceTargets[$referenceId];
         }
 
+        // Resources never survive a round trip (see assertNoResources() for
+        // why that check can't rely on native serialize() failing). Every
+        // node transform() actually visits - array elements, closure use
+        // variables and $this, Spl* container contents, object properties -
+        // passes through here, so a resource reached that way (including
+        // one nested inside a closure's bound $this, which the cheaper
+        // up-front scan in assertNoResources() deliberately does not follow)
+        // is still caught whenever that node needs Stasis handling at all.
+        if (\is_resource($source)) {
+            throw new SerializerError(
+                "Cannot serialize a resource ({$this->resourceType($source)})" . $this->describeLocation($path)
+            );
+        }
+
         // Try native serialization first
+        $deniedForSelf = false;
         try {
             $serialized = serialize($source);
             // Some types need special handling (broken in older PHP or need weak semantics)
@@ -237,12 +375,43 @@ class Codec
             }
             $this->referenceTargets[$referenceId] = &$target;
             return $target;
-        } catch (Throwable) {
-            // Native serialization failed, use Stasis
+        } catch (Throwable $e) {
+            // Native serialization failed, use Stasis - unless PHP denied
+            // serialization of $source itself (not of something nested inside
+            // it, e.g. a Closure property): PHP reports that with the exact
+            // message "Serialization of '<class>' is not allowed", naming the
+            // class of the value it refused outright, so comparing against
+            // get_class($source) tells apart "$source itself is denied" from
+            // "some unrelated nested value made native serialize() fail".
+            if (\is_object($source)) {
+                $deniedForSelf = $e->getMessage() === "Serialization of '" . \get_class($source) . "' is not allowed";
+            }
         }
 
         // Create appropriate Stasis subclass
         $target = Stasis::from($source);
+
+        // ObjectStasis is the generic fallback used when no dedicated Stasis
+        // subclass (and no custom factory) claims the value. It restores the
+        // instance by copying raw properties onto a newInstanceWithoutConstructor()
+        // instance, which works for plain data holders like stdClass, but not
+        // for a class whose native serialization PHP itself denies (Generator,
+        // Fiber, SplFileObject, ...): their state isn't just plain object
+        // properties, so copying properties can't reconstruct them. We already
+        // know $source's own serialization was denied ($deniedForSelf, found
+        // above without any extra native serialize() call); isInternal() is a
+        // second, independent cheap check confirming this is a real engine
+        // denial and not a look-alike message from user code.
+        if ($deniedForSelf && $target instanceof ObjectStasis) {
+            $rc = new \ReflectionClass($source);
+            if ($rc->isInternal()) {
+                throw new SerializerError(
+                    "Cannot serialize instance of internal class '" . $rc->getName() . "': its serialization is not supported"
+                    . $this->describeLocation($path)
+                );
+            }
+        }
+
         $this->shortcuts[] = &$target;
         if (\is_object($source)) {
             $this->encodedObjects[$source] = $target;
